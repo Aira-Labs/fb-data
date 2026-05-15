@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aira Labs · PM2.5</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>
+:root{
+  --bg:#0a0c0f;--surface:#111418;--surface2:#181c22;
+  --border:rgba(255,255,255,0.07);--border2:rgba(255,255,255,0.12);
+  --text:#e8eaed;--muted:#6b7280;--dim:#2d333d;
+  --font:'DM Mono',monospace;--display:'Syne',sans-serif;
+  --fb:#3b82f6;--s1:#10b981;--s2:#f59e0b;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden}
+body::before{content:'';position:fixed;inset:0;
+  background-image:repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(255,255,255,0.012) 40px),
+  repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(255,255,255,0.012) 40px);
+  pointer-events:none;z-index:0}
+
+/* ── LAYOUT ── */
+#shell{position:relative;z-index:1;display:grid;grid-template-rows:52px 1fr;grid-template-columns:1fr 260px;height:100vh}
+
+/* ── HEADER ── */
+header{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;border-bottom:1px solid var(--border);background:var(--surface)}
+.logo{display:flex;align-items:center;gap:10px}
+.logo-mark{width:28px;height:28px;border:1.5px solid var(--fb);border-radius:6px;
+  display:flex;align-items:center;justify-content:center}
+.logo-mark::after{content:'';width:10px;height:10px;border-radius:50%;background:var(--fb);
+  animation:pulse 2.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:0.45}}
+.logo-name{font-family:var(--display);font-weight:800;font-size:1rem;letter-spacing:-.01em}
+.logo-sub{font-size:.6rem;color:var(--muted);letter-spacing:.18em;text-transform:uppercase}
+.hdr-right{display:flex;align-items:center;gap:12px}
+.aqi-chip{display:flex;align-items:center;gap:4px;font-size:.57rem;color:var(--muted)}
+.aqi-swatch{width:8px;height:8px;border-radius:2px;flex-shrink:0}
+.hdr-div{width:1px;height:20px;background:var(--border)}
+.ds-btn{display:flex;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;border:1px solid;
+  font-family:var(--font);font-size:.62rem;cursor:pointer;background:transparent;transition:all .15s}
+.ds-btn[data-k="s1"]{--c:var(--s1)}
+.ds-btn[data-k="s2"]{--c:var(--s2)}
+.ds-btn{border-color:var(--c);color:var(--c)}
+.ds-btn.on{background:color-mix(in srgb,var(--c) 18%,transparent)}
+.ds-btn.off{opacity:.32}
+.ds-dot{width:6px;height:6px;border-radius:50%;background:var(--c)}
+.hdr-meta{font-size:.6rem;color:var(--muted)}
+
+/* ── CHARTS COLUMN ── */
+#charts{grid-column:1;grid-row:2;display:flex;flex-direction:column;
+  overflow:hidden;padding:14px 20px 12px;gap:0;min-width:0}
+.chart-row{display:flex;flex-direction:column;min-height:0;
+  transition:flex .3s ease,opacity .25s ease,max-height .3s ease;overflow:hidden}
+.chart-row.hidden-row{flex:0!important;opacity:0;max-height:0!important;pointer-events:none}
+#row-fb,#row-s1,#row-s2{flex:1 1 0;min-height:0}
+#row-s1,#row-s2{margin-top:2px}
+.row-label{display:flex;align-items:center;justify-content:space-between;
+  padding:5px 0 4px;flex-shrink:0;border-top:1px solid var(--border)}
+#row-fb .row-label{border-top:none;padding-top:0}
+.row-label-left{display:flex;align-items:center;gap:8px}
+.row-name{font-family:var(--display);font-weight:600;font-size:.78rem;letter-spacing:-.01em}
+.row-sub{font-size:.56rem;color:var(--muted)}
+.row-stat{font-family:var(--display);font-weight:700;font-size:.82rem;transition:color .2s}
+.canvas-wrap{flex:1;position:relative;min-height:0;cursor:pointer}
+.canvas-wrap canvas{position:absolute;inset:0}
+
+/* ── MAP PANEL ── */
+#map-panel{grid-column:2;grid-row:2;display:flex;flex-direction:column;
+  border-left:1px solid var(--border);overflow:hidden}
+#map-header{padding:11px 14px 10px;border-bottom:1px solid var(--border);
+  background:var(--surface);flex-shrink:0}
+.map-title{font-size:.55rem;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--dim);margin-bottom:8px}
+#map-ts{font-family:var(--display);font-weight:700;font-size:.85rem;
+  letter-spacing:-.01em;margin-bottom:9px;min-height:1.1em}
+#map-ts.idle{font-family:var(--font);font-weight:400;font-size:.6rem;color:var(--dim)}
+.srow{display:flex;align-items:center;gap:7px;margin-bottom:6px}
+.srow:last-child{margin-bottom:0}
+.sdot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.sname{font-size:.62rem;color:var(--muted);flex:1}
+.sval{font-family:var(--display);font-weight:700;font-size:.9rem;transition:color .2s;min-width:52px;text-align:right}
+.sval.nd{color:var(--dim)!important;font-family:var(--font);font-weight:400;font-size:.6rem}
+#map-el{flex:1;min-height:0}
+#map-hint{padding:5px 14px;font-size:.55rem;color:var(--dim);
+  border-top:1px solid var(--border);background:var(--surface);text-align:center;flex-shrink:0}
+
+/* ── LEAFLET DARK ── */
+.leaflet-tile{filter:brightness(.36) saturate(.55) hue-rotate(195deg)}
+.leaflet-container{background:#0d1117}
+.leaflet-control-zoom{border:1px solid rgba(255,255,255,.1)!important;border-radius:6px!important;
+  overflow:hidden;background:rgba(17,20,24,.92)!important;box-shadow:none!important}
+.leaflet-control-zoom a{background:transparent!important;color:#6b7280!important;
+  border-bottom-color:rgba(255,255,255,.07)!important;
+  width:24px!important;height:24px!important;line-height:24px!important;font-size:14px!important}
+.leaflet-control-zoom a:hover{color:#e8eaed!important}
+.leaflet-control-attribution{display:none!important}
+.leaflet-popup-content-wrapper{background:rgba(17,20,24,.97)!important;
+  border:1px solid rgba(255,255,255,.12)!important;border-radius:8px!important;
+  color:#e8eaed!important;box-shadow:0 6px 24px rgba(0,0,0,.5)!important;
+  font-family:'DM Mono',monospace!important}
+.leaflet-popup-tip{background:rgba(17,20,24,.97)!important}
+.leaflet-popup-close-button{color:#6b7280!important;top:6px!important;right:8px!important}
+</style>
+</head>
+<body>
+<div id="shell">
+
+  <header>
+    <div class="logo">
+      <div class="logo-mark"></div>
+      <div><div class="logo-name">Aira Labs</div><div class="logo-sub">PM2.5 Network</div></div>
+    </div>
+    <div class="hdr-right">
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#0CEE88"></div>Optimal 0–5</div>
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#52D359"></div>Acceptable 5–15</div>
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#FCC865"></div>Caution 15–25</div>
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#EE7300"></div>Poor 25–35</div>
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#C4024B"></div>Very Poor 35–45</div>
+      <div class="aqi-chip"><div class="aqi-swatch" style="background:#C100FF"></div>Severe 45+</div>
+      <div class="hdr-div"></div>
+      <button class="ds-btn on" data-k="s1" onclick="toggleRow('s1')"><span class="ds-dot"></span>Teddington S1</button>
+      <button class="ds-btn on" data-k="s2" onclick="toggleRow('s2')"><span class="ds-dot"></span>Kingston S2</button>
+      <div class="hdr-meta">Apr 20 – May 13 · 2026</div>
+    </div>
+  </header>
+
+  <div id="charts">
+    <div class="chart-row" id="row-fb">
+      <div class="row-label">
+        <div class="row-label-left">
+          <span class="row-name">Aira Go (FB)</span>
+          <span class="row-sub">Weybridge · 51.355, -0.488</span>
+        </div>
+        <span class="row-stat" id="stat-fb">–</span>
+      </div>
+      <div class="canvas-wrap"><canvas id="chart-fb" role="img" aria-label="Aira Go FB PM2.5 bar chart"></canvas></div>
+    </div>
+    <div class="chart-row" id="row-s1">
+      <div class="row-label">
+        <div class="row-label-left">
+          <span class="row-name" style="color:var(--s1)">Teddington S1</span>
+          <span class="row-sub">LAQN · 51.425, -0.346</span>
+        </div>
+        <span class="row-stat" id="stat-s1">–</span>
+      </div>
+      <div class="canvas-wrap"><canvas id="chart-s1" role="img" aria-label="Teddington S1 PM2.5 bar chart"></canvas></div>
+    </div>
+    <div class="chart-row" id="row-s2">
+      <div class="row-label">
+        <div class="row-label-left">
+          <span class="row-name" style="color:var(--s2)">Kingston S2</span>
+          <span class="row-sub">LAQN · 51.381, -0.282</span>
+        </div>
+        <span class="row-stat" id="stat-s2">–</span>
+      </div>
+      <div class="canvas-wrap"><canvas id="chart-s2" role="img" aria-label="Kingston S2 PM2.5 bar chart"></canvas></div>
+    </div>
+  </div>
+
+  <div id="map-panel">
+    <div id="map-header">
+      <div class="map-title">Sensor locations · SW London</div>
+      <div id="map-ts" class="idle">Click a bar to inspect</div>
+      <div class="srow">
+        <div class="sdot" style="background:var(--fb)"></div>
+        <span class="sname">Aira Go (FB)</span>
+        <span class="sval nd" id="mv-fb" style="color:var(--fb)">–</span>
+      </div>
+      <div class="srow">
+        <div class="sdot" style="background:var(--s1)"></div>
+        <span class="sname">Teddington S1</span>
+        <span class="sval nd" id="mv-s1" style="color:var(--s1)">–</span>
+      </div>
+      <div class="srow">
+        <div class="sdot" style="background:var(--s2)"></div>
+        <span class="sname">Kingston S2</span>
+        <span class="sval nd" id="mv-s2" style="color:var(--s2)">–</span>
+      </div>
+    </div>
+    <div id="map-el"></div>
+    <div id="map-hint">Click any bar on any chart</div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+// ── ALIGNED DATA ──────────────────────────────────────────────
+const ISOS  = ["2026-04-20T15:00", "2026-04-20T16:00", "2026-04-20T17:00", "2026-04-20T18:00", "2026-04-20T19:00", "2026-04-20T20:00", "2026-04-20T21:00", "2026-04-20T22:00", "2026-04-20T23:00", "2026-04-21T00:00", "2026-04-21T01:00", "2026-04-21T02:00", "2026-04-21T03:00", "2026-04-21T04:00", "2026-04-21T05:00", "2026-04-21T06:00", "2026-04-21T07:00", "2026-04-21T08:00", "2026-04-21T09:00", "2026-04-21T10:00", "2026-04-21T11:00", "2026-04-21T12:00", "2026-04-21T13:00", "2026-04-21T14:00", "2026-04-21T15:00", "2026-04-21T16:00", "2026-04-21T17:00", "2026-04-21T18:00", "2026-04-21T19:00", "2026-04-21T20:00", "2026-04-21T21:00", "2026-04-21T22:00", "2026-04-21T23:00", "2026-04-22T00:00", "2026-04-22T01:00", "2026-04-22T02:00", "2026-04-22T03:00", "2026-04-22T04:00", "2026-04-22T05:00", "2026-04-22T06:00", "2026-04-22T07:00", "2026-04-22T08:00", "2026-04-22T09:00", "2026-04-22T10:00", "2026-04-22T11:00", "2026-04-22T12:00", "2026-04-22T13:00", "2026-04-22T14:00", "2026-04-22T15:00", "2026-04-22T16:00", "2026-04-22T17:00", "2026-04-22T18:00", "2026-04-22T19:00", "2026-04-22T20:00", "2026-04-22T21:00", "2026-04-22T22:00", "2026-04-22T23:00", "2026-04-23T00:00", "2026-04-23T01:00", "2026-04-23T02:00", "2026-04-23T03:00", "2026-04-23T04:00", "2026-04-23T05:00", "2026-04-23T06:00", "2026-04-23T07:00", "2026-04-23T08:00", "2026-04-23T09:00", "2026-04-23T10:00", "2026-04-23T11:00", "2026-04-23T12:00", "2026-04-23T13:00", "2026-04-23T14:00", "2026-04-23T15:00", "2026-04-23T16:00", "2026-04-23T17:00", "2026-04-23T18:00", "2026-04-23T19:00", "2026-04-23T20:00", "2026-04-23T21:00", "2026-04-23T22:00", "2026-04-23T23:00", "2026-04-24T00:00", "2026-04-24T01:00", "2026-04-24T02:00", "2026-04-24T03:00", "2026-04-24T04:00", "2026-04-24T05:00", "2026-04-24T06:00", "2026-04-24T07:00", "2026-04-24T08:00", "2026-04-24T09:00", "2026-04-24T10:00", "2026-04-24T11:00", "2026-04-24T12:00", "2026-04-24T13:00", "2026-04-24T14:00", "2026-04-24T15:00", "2026-04-24T16:00", "2026-04-24T17:00", "2026-04-24T18:00", "2026-04-24T19:00", "2026-04-24T20:00", "2026-04-24T21:00", "2026-04-24T22:00", "2026-04-24T23:00", "2026-04-25T00:00", "2026-04-25T01:00", "2026-04-25T02:00", "2026-04-25T03:00", "2026-04-25T04:00", "2026-04-25T05:00", "2026-04-25T06:00", "2026-04-25T07:00", "2026-04-25T08:00", "2026-04-25T09:00", "2026-04-25T10:00", "2026-04-25T11:00", "2026-04-25T12:00", "2026-04-25T13:00", "2026-04-25T14:00", "2026-04-25T15:00", "2026-04-25T16:00", "2026-04-25T17:00", "2026-04-25T18:00", "2026-04-25T19:00", "2026-04-25T20:00", "2026-04-25T21:00", "2026-04-25T22:00", "2026-04-25T23:00", "2026-04-26T00:00", "2026-04-26T01:00", "2026-04-26T02:00", "2026-04-26T03:00", "2026-04-26T04:00", "2026-04-26T05:00", "2026-04-26T06:00", "2026-04-26T07:00", "2026-04-26T08:00", "2026-04-26T09:00", "2026-04-26T10:00", "2026-04-26T11:00", "2026-04-26T12:00", "2026-04-26T13:00", "2026-04-26T14:00", "2026-04-26T15:00", "2026-04-26T16:00", "2026-04-26T17:00", "2026-04-26T18:00", "2026-04-26T19:00", "2026-04-26T20:00", "2026-04-26T21:00", "2026-04-26T22:00", "2026-04-26T23:00", "2026-04-27T00:00", "2026-04-27T01:00", "2026-04-27T02:00", "2026-04-27T03:00", "2026-04-27T04:00", "2026-04-27T05:00", "2026-04-27T06:00", "2026-04-27T07:00", "2026-04-27T08:00", "2026-04-27T09:00", "2026-04-27T10:00", "2026-04-27T11:00", "2026-04-27T12:00", "2026-04-27T13:00", "2026-04-27T14:00", "2026-04-27T15:00", "2026-04-27T16:00", "2026-04-27T17:00", "2026-04-27T18:00", "2026-04-27T19:00", "2026-04-27T20:00", "2026-04-27T21:00", "2026-04-27T22:00", "2026-04-27T23:00", "2026-04-28T00:00", "2026-04-28T01:00", "2026-04-28T02:00", "2026-04-28T03:00", "2026-04-28T04:00", "2026-04-28T05:00", "2026-04-28T06:00", "2026-04-28T07:00", "2026-04-28T08:00", "2026-04-28T09:00", "2026-04-28T10:00", "2026-04-28T11:00", "2026-04-28T12:00", "2026-04-28T13:00", "2026-04-28T14:00", "2026-04-28T15:00", "2026-04-28T16:00", "2026-04-28T17:00", "2026-04-28T18:00", "2026-04-28T19:00", "2026-04-28T20:00", "2026-04-28T21:00", "2026-04-28T22:00", "2026-04-28T23:00", "2026-04-29T00:00", "2026-04-29T01:00", "2026-04-29T02:00", "2026-04-29T03:00", "2026-04-29T04:00", "2026-04-29T05:00", "2026-04-29T06:00", "2026-04-29T07:00", "2026-04-29T08:00", "2026-04-29T09:00", "2026-04-29T10:00", "2026-04-29T11:00", "2026-04-29T12:00", "2026-04-29T13:00", "2026-04-29T14:00", "2026-04-29T15:00", "2026-04-29T16:00", "2026-04-29T17:00", "2026-04-29T18:00", "2026-04-29T19:00", "2026-04-29T20:00", "2026-04-29T21:00", "2026-04-29T22:00", "2026-04-29T23:00", "2026-04-30T00:00", "2026-04-30T01:00", "2026-04-30T02:00", "2026-04-30T03:00", "2026-04-30T04:00", "2026-04-30T05:00", "2026-04-30T06:00", "2026-04-30T07:00", "2026-04-30T08:00", "2026-04-30T09:00", "2026-04-30T10:00", "2026-04-30T11:00", "2026-04-30T12:00", "2026-04-30T13:00", "2026-04-30T14:00", "2026-04-30T15:00", "2026-04-30T16:00", "2026-04-30T17:00", "2026-04-30T18:00", "2026-04-30T19:00", "2026-04-30T20:00", "2026-04-30T21:00", "2026-04-30T22:00", "2026-04-30T23:00", "2026-05-01T00:00", "2026-05-01T01:00", "2026-05-01T02:00", "2026-05-01T03:00", "2026-05-01T04:00", "2026-05-01T05:00", "2026-05-01T06:00", "2026-05-01T07:00", "2026-05-01T08:00", "2026-05-01T09:00", "2026-05-01T10:00", "2026-05-01T11:00", "2026-05-01T12:00", "2026-05-01T13:00", "2026-05-01T14:00", "2026-05-01T15:00", "2026-05-01T16:00", "2026-05-01T17:00", "2026-05-01T18:00", "2026-05-01T19:00", "2026-05-01T20:00", "2026-05-01T21:00", "2026-05-01T22:00", "2026-05-01T23:00", "2026-05-02T01:00", "2026-05-02T02:00", "2026-05-02T03:00", "2026-05-02T04:00", "2026-05-02T05:00", "2026-05-02T06:00", "2026-05-02T07:00", "2026-05-02T08:00", "2026-05-02T09:00", "2026-05-02T10:00", "2026-05-02T11:00", "2026-05-02T12:00", "2026-05-02T13:00", "2026-05-02T14:00", "2026-05-02T15:00", "2026-05-02T16:00", "2026-05-02T17:00", "2026-05-02T18:00", "2026-05-02T19:00", "2026-05-02T20:00", "2026-05-02T21:00", "2026-05-02T22:00", "2026-05-02T23:00", "2026-05-03T00:00", "2026-05-03T01:00", "2026-05-03T02:00", "2026-05-03T03:00", "2026-05-03T04:00", "2026-05-03T05:00", "2026-05-03T06:00", "2026-05-03T07:00", "2026-05-03T08:00", "2026-05-03T09:00", "2026-05-03T10:00", "2026-05-03T11:00", "2026-05-03T12:00", "2026-05-03T13:00", "2026-05-03T14:00", "2026-05-03T15:00", "2026-05-03T16:00", "2026-05-03T17:00", "2026-05-03T18:00", "2026-05-03T19:00", "2026-05-03T20:00", "2026-05-03T21:00", "2026-05-03T22:00", "2026-05-03T23:00", "2026-05-04T00:00", "2026-05-04T01:00", "2026-05-04T02:00", "2026-05-04T03:00", "2026-05-04T04:00", "2026-05-04T05:00", "2026-05-04T06:00", "2026-05-04T07:00", "2026-05-04T08:00", "2026-05-04T09:00", "2026-05-04T10:00", "2026-05-04T11:00", "2026-05-04T12:00", "2026-05-04T13:00", "2026-05-04T14:00", "2026-05-04T15:00", "2026-05-04T16:00", "2026-05-04T17:00", "2026-05-04T18:00", "2026-05-04T19:00", "2026-05-04T20:00", "2026-05-04T21:00", "2026-05-04T22:00", "2026-05-04T23:00", "2026-05-05T00:00", "2026-05-05T01:00", "2026-05-05T02:00", "2026-05-05T03:00", "2026-05-05T04:00", "2026-05-05T05:00", "2026-05-05T06:00", "2026-05-05T07:00", "2026-05-05T08:00", "2026-05-05T09:00", "2026-05-05T10:00", "2026-05-05T11:00", "2026-05-05T12:00", "2026-05-05T13:00", "2026-05-05T14:00", "2026-05-05T15:00", "2026-05-05T16:00", "2026-05-05T17:00", "2026-05-05T18:00", "2026-05-05T19:00", "2026-05-05T20:00", "2026-05-05T21:00", "2026-05-05T22:00", "2026-05-05T23:00", "2026-05-06T00:00", "2026-05-06T01:00", "2026-05-06T02:00", "2026-05-06T03:00", "2026-05-06T04:00", "2026-05-06T05:00", "2026-05-06T06:00", "2026-05-06T07:00", "2026-05-06T08:00", "2026-05-06T09:00", "2026-05-06T10:00", "2026-05-06T11:00", "2026-05-06T12:00", "2026-05-06T13:00", "2026-05-06T14:00", "2026-05-06T15:00", "2026-05-06T16:00", "2026-05-06T17:00", "2026-05-06T18:00", "2026-05-06T19:00", "2026-05-06T20:00", "2026-05-06T21:00", "2026-05-06T22:00", "2026-05-06T23:00", "2026-05-07T00:00", "2026-05-07T01:00", "2026-05-07T02:00", "2026-05-07T03:00", "2026-05-07T04:00", "2026-05-07T05:00", "2026-05-07T06:00", "2026-05-07T07:00", "2026-05-07T08:00", "2026-05-07T09:00", "2026-05-07T10:00", "2026-05-07T11:00", "2026-05-07T12:00", "2026-05-07T13:00", "2026-05-07T14:00", "2026-05-07T15:00", "2026-05-07T16:00", "2026-05-07T17:00", "2026-05-07T18:00", "2026-05-07T19:00", "2026-05-07T20:00", "2026-05-07T21:00", "2026-05-07T22:00", "2026-05-07T23:00", "2026-05-08T00:00", "2026-05-08T01:00", "2026-05-08T02:00", "2026-05-08T03:00", "2026-05-08T04:00", "2026-05-08T05:00", "2026-05-08T06:00", "2026-05-08T07:00", "2026-05-08T08:00", "2026-05-08T09:00", "2026-05-08T10:00", "2026-05-08T11:00", "2026-05-08T12:00", "2026-05-08T13:00", "2026-05-08T14:00", "2026-05-08T15:00", "2026-05-08T16:00", "2026-05-08T17:00", "2026-05-08T18:00", "2026-05-08T19:00", "2026-05-08T20:00", "2026-05-08T21:00", "2026-05-08T22:00", "2026-05-08T23:00", "2026-05-09T00:00", "2026-05-09T01:00", "2026-05-09T02:00", "2026-05-09T03:00", "2026-05-09T04:00", "2026-05-09T05:00", "2026-05-09T06:00", "2026-05-09T07:00", "2026-05-09T08:00", "2026-05-09T09:00", "2026-05-09T10:00", "2026-05-09T11:00", "2026-05-09T12:00", "2026-05-09T13:00", "2026-05-09T14:00", "2026-05-09T15:00", "2026-05-09T16:00", "2026-05-09T17:00", "2026-05-09T18:00", "2026-05-09T19:00", "2026-05-09T20:00", "2026-05-09T21:00", "2026-05-09T22:00", "2026-05-09T23:00", "2026-05-10T00:00", "2026-05-10T01:00", "2026-05-10T02:00", "2026-05-10T03:00", "2026-05-10T04:00", "2026-05-10T05:00", "2026-05-10T06:00", "2026-05-10T07:00", "2026-05-10T08:00", "2026-05-10T09:00", "2026-05-10T10:00", "2026-05-10T11:00", "2026-05-10T12:00", "2026-05-10T13:00", "2026-05-10T14:00", "2026-05-10T15:00", "2026-05-10T16:00", "2026-05-10T17:00", "2026-05-10T18:00", "2026-05-10T19:00", "2026-05-10T20:00", "2026-05-10T21:00", "2026-05-10T22:00", "2026-05-10T23:00", "2026-05-11T00:00", "2026-05-11T01:00", "2026-05-11T02:00", "2026-05-11T03:00", "2026-05-11T04:00", "2026-05-11T05:00", "2026-05-11T06:00", "2026-05-11T07:00", "2026-05-11T08:00", "2026-05-11T09:00", "2026-05-11T10:00", "2026-05-11T11:00", "2026-05-11T12:00", "2026-05-11T13:00", "2026-05-11T14:00", "2026-05-11T15:00", "2026-05-11T16:00", "2026-05-11T17:00", "2026-05-11T18:00", "2026-05-11T19:00", "2026-05-11T20:00", "2026-05-11T21:00", "2026-05-11T22:00", "2026-05-11T23:00", "2026-05-12T00:00", "2026-05-12T01:00", "2026-05-12T02:00", "2026-05-12T03:00", "2026-05-12T04:00", "2026-05-12T05:00", "2026-05-12T06:00", "2026-05-12T07:00", "2026-05-12T08:00", "2026-05-12T09:00", "2026-05-12T10:00", "2026-05-12T11:00", "2026-05-12T12:00", "2026-05-12T13:00", "2026-05-12T14:00", "2026-05-12T15:00", "2026-05-12T16:00", "2026-05-12T17:00", "2026-05-12T18:00", "2026-05-12T19:00", "2026-05-12T20:00", "2026-05-12T21:00", "2026-05-12T22:00", "2026-05-12T23:00", "2026-05-13T00:00", "2026-05-13T01:00", "2026-05-13T02:00", "2026-05-13T03:00", "2026-05-13T04:00", "2026-05-13T05:00", "2026-05-13T06:00", "2026-05-13T07:00", "2026-05-13T08:00", "2026-05-13T09:00", "2026-05-13T10:00", "2026-05-13T11:00", "2026-05-13T12:00", "2026-05-13T13:00", "2026-05-13T14:00", "2026-05-13T15:00", "2026-05-13T16:00", "2026-05-13T17:00", "2026-05-13T18:00", "2026-05-13T19:00", "2026-05-13T20:00", "2026-05-13T21:00"];
+const FB    = [1.275, 0.97, 1.171, 9.372, 7.73, 2.68, 1.913, 1.61, 1.36, 1.173, 1.253, 1.75, 1.977, 2.073, 2.527, 3.183, 4.09, 4.137, 3.66, 3.28, 3.17, 3.137, 3.517, 3.977, 4.313, 3.957, 3.572, 5.88, 2.437, 2.853, 2.867, 2.777, 2.797, 2.697, 2.937, 2.867, 3.103, 3.617, 4.46, 5.363, 6.897, 6.22, 5.273, 4.495, 3.851, 3.983, 3.942, 4.14, 3.913, 4.003, 5.484, 7.383, 4.993, 3.973, 3.763, 3.687, 3.54, 3.83, 4.493, 4.607, 4.963, 5.34, 5.593, 6.987, 9.877, 16.083, 15.063, 11.7, 7.877, 5.633, 5.28, 5.19, 4.346, 2.503, 1.868, 2.768, 8.393, 10.383, 7.69, 6.31, 5.147, 4.553, 4.18, 3.775, null, null, null, null, null, 6.068, 4.9, 3.393, 2.523, 2.147, 1.39, 1.193, 0.857, 2.203, 2.367, 0.797, 1.223, 1.453, 1.823, 2.043, 2.366, 2.79, 3.17, 3.424, 3.423, 3.293, 7.603, 9.728, 10.04, 10.297, 17.237, 9.567, 5.303, 3.237, 2.17, 1.69, 1.543, 1.84, 2.277, 2.448, 3.137, 3.39, 2.937, 3.397, 4.48, 4.967, 4.383, 4.413, 4.547, 4.573, 6.903, 10.153, 8.963, 12.683, 9.387, 7.102, 5.467, 3.947, 3.037, 3.879, 3.883, 4.673, 6.232, 4.83, 6.85, 6.117, 5.624, 5.177, 4.943, 5.233, 6.27, 6.707, 6.21, 6.897, 7.017, 7.223, 18.01, 19.617, 17.467, 13.259, 7.07, 6.445, 5.241, 4.817, 5.117, 4.903, 5.44, 5.357, 5.677, 6.09, 5.167, 4.71, 5.11, 6.287, 6.61, 6.183, 4.897, 4.387, 4.39, 4.057, 5.179, 6.497, 7.623, 2.753, 3.1, 3.37, 2.97, 12.018, 1.424, 1.403, 1.54, 1.907, 2.1, 10.457, 1.393, 1.587, 1.627, 1.755, 1.837, 2.034, 2.23, 2.177, 2.037, 2.69, 1.824, 10.133, 0.653, 0.557, 0.477, 1.421, 3.233, 2.003, 6.737, 12.54, 1.686, 2.0, 7.451, 8.943, 6.577, 5.103, 4.197, 3.603, 3.067, 2.55, 2.41, 2.193, 2.045, 2.307, 1.8, 2.32, 1.756, 1.53, 1.163, 19.405, 1.543, 0.923, 0.87, 0.907, 3.297, 3.153, 3.39, 4.253, 14.82, 2.731, 22.683, 51.203, 14.19, 5.88, 3.327, 2.88, 3.003, 2.587, 2.383, 2.397, 2.279, 2.047, 2.073, 2.557, 3.507, 4.41, 6.727, 5.98, 6.903, 4.967, 4.803, 4.083, 4.597, 5.513, null, null, null, null, null, null, null, null, null, null, 7.279, 5.245, 16.207, 10.364, 4.603, 4.075, 4.57, 19.638, 13.33, 11.217, 10.15, 5.603, 5.773, 6.233, 7.123, 9.259, 12.01, 12.207, 12.127, 11.303, 8.227, 5.528, 4.469, 16.083, 3.686, 3.337, 5.538, 3.96, 3.333, 3.773, 3.993, 5.583, 6.73, 6.903, 3.284, 4.677, 6.027, 6.64, 7.96, 10.867, 13.51, 14.073, 13.51, 13.707, 14.26, 14.433, 14.952, 14.417, 19.09, 21.37, 31.793, 18.473, 15.917, 11.137, 8.263, 10.013, 10.557, 9.54, 7.052, 7.19, 5.897, 4.767, 4.752, 4.973, 7.221, 8.19, 8.657, 7.917, 7.421, 7.683, 6.377, 7.566, 6.553, 3.896, 3.593, 3.757, 3.619, 4.88, 6.943, 12.267, 9.97, 6.993, 5.643, 4.557, 4.403, 3.121, 2.123, 2.427, 1.987, 2.013, 2.3, 2.793, 2.377, 2.08, 2.357, 1.917, 1.427, 1.163, 1.157, 1.32, 1.373, 1.643, 1.593, 1.463, 1.45, 1.445, 1.583, 1.722, 2.167, 2.48, 3.173, 5.77, 6.627, 6.924, 7.023, 7.337, 7.266, 7.63, 5.523, 4.224, 2.897, 2.634, 2.534, 2.572, 2.61, 2.36, 2.29, 2.313, 2.067, 1.91, 1.839, 1.752, 1.55, 3.43, 4.267, 4.73, 5.177, 5.476, 6.397, 6.727, 6.433, 6.68, 11.535, 10.477, 10.3, 9.1, 6.767, 5.073, 4.39, 3.737, 5.063, 7.167, 8.728, 8.569, 9.01, 7.253, 9.807, 14.437, 21.12, 24.683, 44.66, 57.537, 58.44, 55.9, 47.717, 33.277, 23.337, 16.5, 14.87, 13.32, 9.137, 6.875, 6.62, 7.214, 7.383, 5.17, 4.677, 4.073, 3.343, 3.64, 4.313, 4.883, 6.897, 8.943, 14.82, 14.64, 9.56, 5.533, 5.097, 4.503, 10.567, 3.053, 2.297, 9.096, 12.663, 19.167, 29.463, 11.75, null, null, null, null, 1.448, 1.272, 1.29, 1.343, 1.39, 1.54, 2.007, 2.27, 1.933, 1.897, 1.703, 1.46, 1.703, 1.378, 1.293, 1.545, 1.622, 1.457, 1.443, 1.34, 1.68, 1.493, 1.403, 1.437, 1.377, 1.627, 1.94, 5.4, 5.673, 3.443, 3.18, 3.347, 3.44, 3.777, 3.223, 2.237, 1.9, 1.52, 1.133, 0.917, 1.037, 1.138, 1.43, 1.503, 1.533, 1.357, 34.1, 1.41, 1.63, 2.89, 2.533, 2.24, 2.273, 2.203, 2.443, 2.82, 3.15, 3.52, 3.263, 3.357, 2.41, 1.362, 1.823, 1.7, 1.537, 1.543, 1.037, 1.01, 0.843, 3.07, 3.313, 2.45, 2.563, 1.086];
+const S1    = [3.16, 3.302, 3.42, 3.208, 3.491, 3.962, 4.458, 3.278, 2.642, null, 3.09, 3.373, 3.726, 4.575, 6.887, 8.349, 9.151, 9.788, 9.175, 8.255, 9.104, 8.679, 8.915, 8.09, 8.632, 7.052, 6.698, 5.59, 5.495, 6.061, 6.25, 6.722, 7.099, null, 7.335, 7.382, 8.09, 9.175, 10.613, 11.981, 13.349, 14.127, 13.349, 10.755, 8.962, 7.264, 6.392, 6.179, 6.698, 6.958, 7.359, 9.151, 8.726, 7.5, 7.359, 7.264, 7.854, null, 11.109, 11.533, 11.462, 12.123, 12.759, 13.561, 14.458, 17.005, 18.538, 16.84, 14.104, 10.472, 9.151, 8.703, 7.877, 5.896, 4.599, 4.434, 5.354, 12.877, 12.028, 7.759, 8.443, null, 7.241, 7.925, 8.726, 9.175, 9.741, 9.693, 9.245, 8.514, 9.528, 7.877, 6.439, 5.212, 4.788, 4.34, 3.066, 2.382, 1.981, 2.217, 3.632, 4.198, 4.552, 5.094, 6.557, null, 9.458, 10.637, 9.788, 8.09, 15.66, 17.901, 16.085, 16.698, 18.726, 16.745, 8.986, 5.0, 3.986, 3.703, 3.538, 3.868, 4.693, 5.33, 6.014, 5.401, 6.203, 6.061, 7.028, null, 8.349, 8.184, 8.491, 11.132, 15.543, 17.783, 16.51, 17.146, 15.165, 12.311, 9.434, 7.901, 6.722, 6.816, 7.382, 8.16, 8.373, 8.326, 10.071, 10.543, 8.585, 9.717, 10.047, null, 10.66, 11.085, 12.028, 12.476, 12.547, 13.609, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, 5.566, 5.943, 5.472, 6.132, 6.887, 6.415, 7.736, 8.774, 7.547, 6.132, 6.226, 7.547, 7.17, 10.094, 14.151, 13.868, 15.189, 18.113, 18.113, 17.453, 16.981, 17.547, 17.359, 16.698, 12.17, 9.528, 6.887, 6.415, 5.66, 6.321, 6.981, 7.83, 8.019, 7.547, 8.774, 9.906, 11.415, null, 13.962, 15.094, 16.038, 15.0, 15.566, 15.189, 11.321, 6.792, 5.66, 7.076, 5.094, 4.623, 4.811, 4.34, 4.34, 4.623, 5.849, 6.604, 5.66, 5.849, 6.321, 7.453, 8.774, null, 10.094, 11.698, 14.906, 16.226, 16.226, 15.472, 16.226, 17.642, 18.396, 19.151, 17.925, 15.472, 14.151, 15.377, 15.472, 9.623, 9.434, 9.811, 10.283, 10.377, 10.0, 7.642, 7.17, null, 9.34, 14.623, 11.698, 15.283, 15.094, 11.226, 10.377, 8.396, 9.34, 10.0, null, 5.377, 4.623, 4.434, 5.094, 4.717, 4.528, 5.377, 5.849, 8.019, 7.642, 7.547, 6.887, null, 4.528, 5.0, 4.057, 5.377, 5.755, 5.66, 5.189, 4.528, 4.057, 3.302, 3.113, 3.208, 3.585, 3.962, 3.774, 3.774, 3.868, 3.868, 3.585, 3.302, 3.208, 4.057, 4.151, null, 6.226, 6.604, 6.698, 6.792, 6.981, 6.981, 9.34, 10.566, 8.491, 6.792, 6.132, 5.943, 5.566, 5.66, 5.566, 5.189, 5.283, 5.189, 5.849, 6.698, 7.642, 7.83, 8.113, null, 7.736, 7.547, 9.906, 11.698, 11.415, 12.076, 14.434, 19.151, 23.302, 17.925, 10.377, 9.34, 10.472, 8.208, 10.094, 13.113, 13.585, 13.113, 12.453, 11.604, 11.132, 13.113, 18.774, null, 35.566, 40.849, 45.189, 41.227, 36.321, 39.057, 36.321, 29.151, 26.321, 21.981, 20.377, 17.547, 20.189, 12.453, 11.038, 10.943, 9.717, 9.057, 8.585, 6.792, 5.849, 5.849, 7.17, null, 10.377, 12.736, 16.981, 15.472, 11.132, 8.019, 7.547, 8.019, 8.396, 9.434, 8.302, 13.774, 9.528, 4.717, 3.774, 3.491, 3.491, 3.585, 4.057, 4.151, 4.34, 4.057, 4.057, null, 4.434, 4.34, 5.094, 5.189, 4.811, 5.283, 4.811, 5.472, 4.717, 3.962, 3.396, 3.302, 3.208, 2.642, 3.868, 4.906, 3.679, 3.019, 3.302, 3.774, 4.717, 5.472, 4.811, null, 4.151, 5.283, 4.906, 5.094, 4.717, 5.66, 7.264, 6.887, 6.887, 4.623, 2.925, 2.736, 3.491, 4.528, 4.34, 3.868, 3.679, 2.925, 3.302, 4.434, 5.189, 4.717, 4.811, null, 5.0, 5.755, 6.887, 8.019, 8.679, 8.774, 9.151, 8.491, 7.359, 5.0, 2.83, 2.736, 2.075, 1.226, 1.509, 1.226, 2.264, 1.604, 2.075, 2.736, 3.113];
+const S2    = [2.0, 1.0, 3.0, 4.0, 5.0, 5.0, 0.0, 0.0, 2.0, null, 4.0, 4.0, 4.0, 7.0, 10.0, 9.0, 7.0, 18.0, 16.0, 21.0, 19.0, null, 3.0, 55.0, 29.0, 15.0, 8.0, 3.0, 2.0, 0.0, 3.0, null, 7.0, null, 8.0, 7.0, null, 9.0, 9.0, 7.0, 20.0, 23.0, 21.0, 23.0, 17.0, 12.0, 14.0, 15.0, 7.0, 3.0, 7.0, 9.0, 7.0, 6.0, 5.0, 7.0, null, null, 11.0, 11.0, null, 12.0, 14.0, 12.0, 12.0, 13.0, 19.0, 28.0, 18.0, 19.0, 13.0, 19.0, 0.0, 2.0, 3.0, 7.0, 5.0, 20.0, null, 11.0, 12.0, null, 12.0, 10.0, 7.0, 8.0, 10.0, 9.0, 7.0, 20.0, 22.0, 26.0, 13.0, 8.0, 4.0, 7.0, 9.0, 2.0, 0.0, 3.0, 6.0, 7.0, 6.0, 5.0, 9.0, null, 10.0, 12.0, 10.0, 10.0, 25.0, 17.0, 21.0, 26.0, 27.0, 15.0, 24.0, 12.0, 7.0, 9.0, 7.0, 0.0, 3.0, 7.0, 11.0, 11.0, 8.0, 10.0, 13.0, null, 9.0, 12.0, 12.0, 10.0, 10.0, null, 18.0, 27.0, 28.0, 23.0, 17.0, 12.0, 13.0, 18.0, 7.0, 7.0, 7.0, 9.0, null, 12.0, null, null, null, null, null, null, null, null, null, null, 28.0, 31.0, 34.0, 18.0, 19.0, 13.0, null, null, 1.0, 7.0, 13.0, 17.0, 19.0, 21.0, 13.0, 12.0, 12.0, null, 19.0, 11.0, 9.0, 9.0, 8.0, 7.0, 17.0, 16.0, 11.0, 9.0, 9.0, 11.0, 22.0, 17.0, 6.0, 9.0, 13.0, 12.0, 10.0, 8.0, 7.0, 7.0, 9.0, null, 9.0, 8.0, 7.0, 9.0, 8.0, 8.0, 13.0, 13.0, 14.0, 15.0, 10.0, 7.0, 7.0, 8.0, 8.0, 8.0, 12.0, 10.0, 11.0, 24.0, 13.0, 14.0, 13.0, null, 8.0, 10.0, 11.0, 9.0, 16.0, 6.0, 17.0, 15.0, 17.0, 10.0, 17.0, 9.0, 10.0, 12.0, 11.0, 12.0, 15.0, 11.0, 10.0, 13.0, 14.0, 12.0, 17.0, null, 9.0, 10.0, 10.0, 8.0, 6.0, 8.0, 16.0, 11.0, 17.0, 18.0, 17.0, 4.0, 19.0, 12.0, 11.0, 11.0, 15.0, 12.0, 12.0, 10.0, 11.0, 22.0, 12.0, 13.0, 20.0, 15.0, 18.0, 18.0, 23.0, 23.0, 25.0, 33.0, 26.0, 23.0, 26.0, 11.0, 11.0, 9.0, 7.0, 6.0, 5.0, 6.0, 9.0, 12.0, 12.0, 13.0, null, 18.0, 24.0, 17.0, 21.0, 17.0, 16.0, 17.0, 12.0, 11.0, 11.0, 10.0, 10.0, 9.0, 7.0, 5.0, 10.0, 13.0, 9.0, 5.0, 7.0, 11.0, 9.0, 9.0, null, 17.0, 6.0, 19.0, 22.0, 15.0, 17.0, 19.0, 23.0, 30.0, 26.0, 27.0, 18.0, 18.0, 19.0, 17.0, 18.0, 6.0, 7.0, 10.0, 19.0, 9.0, 11.0, 11.0, null, 18.0, 10.0, 10.0, 15.0, 17.0, 15.0, null, 26.0, 20.0, 26.0, 22.0, 9.0, 7.0, 6.0, 4.0, 0.0, 5.0, 7.0, 7.0, 7.0, 6.0, 7.0, 7.0, null, 3.0, 3.0, 1.0, 3.0, 0.0, 0.0, 4.0, 8.0, 16.0, 15.0, 6.0, 6.0, 3.0, 0.0, 0.0, 2.0, 4.0, 5.0, 0.0, 0.0, 0.0, 2.0, 4.0, null, 7.0, 4.0, 5.0, 6.0, 7.0, 8.0, 25.0, 25.0, 6.0, 8.0, 10.0, 6.0, 7.0, 19.0, 8.0, 7.0, 8.0, 11.0, 12.0, 9.0, 7.0, 11.0, 13.0, null, 17.0, 11.0, 9.0, 9.0, 16.0, 19.0, 20.0, 32.0, 48.0, 18.0, 10.0, 12.0, 12.0, 18.0, 19.0, 21.0, 20.0, 16.0, 15.0, 13.0, 16.0, 14.0, 27.0, null, 44.0, 47.0, 52.0, 48.0, 57.0, 50.0, 54.0, 42.0, 42.0, 27.0, 21.0, 24.0, 19.0, 18.0, 0.0, 2.0, 9.0, 11.0, 5.0, 3.0, 6.0, 7.0, 8.0, null, 11.0, 12.0, 18.0, 27.0, 14.0, 14.0, 12.0, 10.0, 9.0, 9.0, 9.0, 9.0, 11.0, 10.0, 8.0, 7.0, 2.0, 2.0, 4.0, 3.0, 3.0, 3.0, 5.0, null, 7.0, 6.0, 5.0, 1.0, 4.0, 6.0, 27.0, 2.0, 1.0, 2.0, 5.0, 3.0, 1.0, 1.0, 2.0, 6.0, 8.0, 7.0, 2.0, 17.0, 0.0, 2.0, 6.0, null, 8.0, 4.0, 5.0, 10.0, 7.0, 6.0, 25.0, 30.0, 22.0, 17.0, 14.0, 10.0, 6.0, 6.0, 6.0, 4.0, 1.0, 3.0, 2.0, 0.0, 1.0, 5.0, 5.0, null, 6.0, 3.0, 6.0, 8.0, 3.0, 6.0, 21.0, 14.0, 14.0, 10.0, 4.0, 4.0, 3.0, 0.0, 2.0, 5.0, 4.0, 5.0, 7.0, 9.0, 4.0];
+
+const N = ISOS.length;
+
+const allLabels = ISOS.map(iso => {
+  const h = iso.slice(11,16);
+  return h === '00:00' ? iso.slice(5,10) : h;
+});
+
+// ── AQI ───────────────────────────────────────────────────────
+function aqiColor(v){
+  if(v==null)return'transparent';
+  if(v<=5) return'#0CEE88'; if(v<=15)return'#52D359';
+  if(v<=25)return'#FCC865'; if(v<=35)return'#EE7300';
+  if(v<=45)return'#C4024B'; return'#C100FF';
+}
+function aqiStatus(v){
+  if(v==null)return'No data';
+  if(v<=5)return'Optimal'; if(v<=15)return'Acceptable';
+  if(v<=25)return'Caution'; if(v<=35)return'Poor';
+  if(v<=45)return'Very Poor'; return'Severe';
+}
+
+// period averages
+function avg(arr){ const v=arr.filter(x=>x!=null); return v.reduce((a,b)=>a+b,0)/v.length; }
+const avgs = { fb:avg(FB), s1:avg(S1), s2:avg(S2) };
+
+// ── LEAFLET ───────────────────────────────────────────────────
+const SENSORS = {
+  fb:{ll:[51.355114,-0.488011],name:'Aira Go (FB)',  color:'#3b82f6'},
+  s1:{ll:[51.425241,-0.345889],name:'Teddington S1', color:'#10b981'},
+  s2:{ll:[51.380652,-0.282346],name:'Kingston S2',   color:'#f59e0b'}
+};
+
+const leafMap = L.map('map-el',{center:[51.392,-0.388],zoom:11,zoomControl:true,attributionControl:false});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18}).addTo(leafMap);
+
+function pinIcon(aqiCol, sensorCol, v){
+  const r = v!=null ? Math.max(14,Math.min(30,11+v*0.36)) : 14;
+  const sz=(r+12)*2, cx=sz/2;
+  const fill = v!=null ? aqiCol : sensorCol;
+  const label = v!=null ? v.toFixed(1) : '–';
+  return L.divIcon({
+    className:'', iconSize:[sz,sz], iconAnchor:[cx,cx],
+    html:`<svg width="${sz}" height="${sz}" viewBox="0 0 ${sz} ${sz}" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="${cx}" cy="${cx}" r="${r+7}" fill="${fill}" opacity="0.15"/>
+      <circle cx="${cx}" cy="${cx}" r="${r}" fill="${fill}" opacity="0.9"/>
+      <text x="${cx}" y="${cx}" text-anchor="middle" dominant-baseline="central"
+        font-size="${Math.max(8,Math.min(13,r*0.52))}" font-weight="500" fill="white"
+        font-family="DM Mono,monospace">${label}</text>
+    </svg>`
+  });
+}
+
+const leafMarkers = {};
+['fb','s1','s2'].forEach(k => {
+  const s = SENSORS[k];
+  const m = L.marker(s.ll, {icon: pinIcon(aqiColor(avgs[k]), s.color, avgs[k])}).addTo(leafMap);
+  leafMarkers[k] = m;
+  setPopup(k, avgs[k], 'Period average');
+});
+
+function setPopup(k, v, timeLabel){
+  const s = SENSORS[k];
+  const col = v!=null ? aqiColor(v) : s.color;
+  const valStr = v!=null ? v.toFixed(1)+' µg/m³' : 'No data';
+  leafMarkers[k].setPopupContent(`
+    <div style="font-family:'DM Mono',monospace;min-width:130px;">
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:13px;color:${s.color};margin-bottom:3px;">${s.name}</div>
+      <div style="font-size:10px;color:#6b7280;margin-bottom:5px;">${timeLabel}</div>
+      <div style="font-size:20px;font-weight:700;color:${col};font-family:'Syne',sans-serif;line-height:1;">${valStr}</div>
+      <div style="font-size:10px;color:${col};margin-top:2px;">${aqiStatus(v)}</div>
+    </div>`);
+}
+if(!leafMarkers.fb._popup) leafMarkers.fb.bindPopup('');
+if(!leafMarkers.s1._popup) leafMarkers.s1.bindPopup('');
+if(!leafMarkers.s2._popup) leafMarkers.s2.bindPopup('');
+// re-bind after setPopupContent needs popup to exist first
+['fb','s1','s2'].forEach(k=>{ if(!leafMarkers[k]._popup) leafMarkers[k].bindPopup(''); setPopup(k,avgs[k],'Period average'); });
+
+// ── MAP UPDATE ────────────────────────────────────────────────
+let selIdx = null;
+
+function updateMap(idx){
+  selIdx = idx;
+  const iso = ISOS[idx];
+  const vFb = FB[idx], vS1 = S1[idx], vS2 = S2[idx];
+
+  // timestamp label
+  const tsEl = document.getElementById('map-ts');
+  tsEl.textContent = iso.replace('T',' ') + ' GMT';
+  tsEl.className = '';
+
+  document.getElementById('map-hint').textContent = 'Click another bar · Click pin for detail';
+
+  // update each sensor
+  [['fb',vFb],['s1',vS1],['s2',vS2]].forEach(([k,v])=>{
+    const s = SENSORS[k];
+    const col = v!=null ? aqiColor(v) : '#374151';
+    leafMarkers[k].setIcon(pinIcon(col, s.color, v));
+    setPopup(k, v, iso.replace('T',' ')+' GMT');
+
+    const el = document.getElementById('mv-'+k);
+    if(v!=null){ el.textContent=v.toFixed(1); el.style.color=col; el.className='sval'; }
+    else{ el.textContent='–'; el.style.color='#2d333d'; el.className='sval nd'; }
+  });
+
+  // redraw charts to show selection highlight
+  Object.values(charts).forEach(c=>c.update('none'));
+}
+
+// ── SELECTION HIGHLIGHT PLUGIN ────────────────────────────────
+const selPlugin = {
+  id:'sel',
+  afterDraw(chart){
+    if(selIdx==null)return;
+    const {ctx,chartArea,scales}=chart; if(!chartArea)return;
+    const x=scales.x.getPixelForValue(selIdx);
+    ctx.save();
+    ctx.fillStyle='rgba(255,255,255,0.06)';
+    ctx.fillRect(x-4,chartArea.top,8,chartArea.bottom-chartArea.top);
+    ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.5)';
+    ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
+    ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
+};
+
+// ── AQI BANDS PLUGIN ──────────────────────────────────────────
+const BANDS=[
+  {lo:0, hi:5, fill:'rgba(12,238,136,0.05)', stroke:'rgba(12,238,136,0.18)', label:'Optimal'},
+  {lo:5, hi:15,fill:'rgba(82,211,89,0.05)',  stroke:'rgba(82,211,89,0.18)',  label:'Acceptable'},
+  {lo:15,hi:25,fill:'rgba(252,200,101,0.05)',stroke:'rgba(252,200,101,0.2)', label:'Caution'},
+  {lo:25,hi:35,fill:'rgba(238,115,0,0.05)',  stroke:'rgba(238,115,0,0.2)',   label:'Poor'},
+  {lo:35,hi:45,fill:'rgba(196,2,75,0.05)',   stroke:'rgba(196,2,75,0.2)',    label:'Very Poor'},
+  {lo:45,hi:999,fill:'rgba(193,0,255,0.05)', stroke:'rgba(193,0,255,0.18)', label:'Severe'}
+];
+
+function aqiBandsPlugin(showLabels){
+  return {
+    id:'bands_'+showLabels,
+    beforeDraw(chart){
+      const {ctx,chartArea,scales}=chart; if(!chartArea)return;
+      const y=scales.y; ctx.save();
+      BANDS.forEach(b=>{
+        const top=y.getPixelForValue(Math.min(b.hi,y.max)), bot=y.getPixelForValue(Math.max(b.lo,y.min));
+        if(bot<=top)return;
+        ctx.fillStyle=b.fill; ctx.fillRect(chartArea.left,top,chartArea.right-chartArea.left,bot-top);
+        ctx.beginPath(); ctx.setLineDash([3,5]); ctx.strokeStyle=b.stroke; ctx.lineWidth=0.75;
+        ctx.moveTo(chartArea.left,top); ctx.lineTo(chartArea.right,top); ctx.stroke(); ctx.setLineDash([]);
+        if(showLabels){
+          ctx.fillStyle=b.stroke; ctx.font='500 9px DM Mono,monospace'; ctx.textAlign='right';
+          ctx.fillText(b.label,chartArea.right-6,top+11);
+        }
+      }); ctx.restore();
+    }
+  };
+}
+
+const daySepsPlugin={
+  id:'days',
+  afterDraw(chart){
+    const {ctx,chartArea,scales}=chart; if(!chartArea)return;
+    ctx.save(); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1;
+    ISOS.forEach((iso,i)=>{
+      if(iso.slice(11,16)==='00:00'){
+        const x=scales.x.getPixelForValue(i);
+        ctx.beginPath(); ctx.moveTo(x,chartArea.top); ctx.lineTo(x,chartArea.bottom); ctx.stroke();
+      }
+    });
+    ctx.restore();
+  }
+};
+
+// ── CHART FACTORY ─────────────────────────────────────────────
+Chart.defaults.color='#4b5563';
+Chart.defaults.borderColor='rgba(255,255,255,0.05)';
+
+const globalMax = Math.ceil(Math.max(...FB.filter(x=>x!=null),...S1.filter(x=>x!=null),...S2.filter(x=>x!=null))*1.08);
+
+function makeChart(canvasId, data, showLabels, showXTicks){
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  return new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:allLabels,
+      datasets:[{
+        data,
+        backgroundColor: data.map(x=>x!=null?aqiColor(x)+'cc':'transparent'),
+        borderColor:     data.map(x=>x!=null?aqiColor(x):'transparent'),
+        borderWidth:1, borderRadius:1, barPercentage:0.95, categoryPercentage:1.0
+      }]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      animation:{duration:200},
+      interaction:{mode:'index',intersect:false},
+      onClick(evt,elements){
+        const pts=this.getElementsAtEventForMode(evt,'index',{intersect:false},false);
+        if(pts.length>0) updateMap(pts[0].index);
+      },
+      plugins:{
+        legend:{display:false},
+        tooltip:{
+          backgroundColor:'rgba(10,12,15,0.96)', titleColor:'#e8eaed', bodyColor:'#9ca3af',
+          borderColor:'rgba(255,255,255,0.1)', borderWidth:1, padding:10,
+          titleFont:{family:'Syne,sans-serif',weight:'600',size:12},
+          bodyFont:{family:'DM Mono,monospace',size:11},
+          callbacks:{
+            title:items=>ISOS[items[0].dataIndex].replace('T',' ')+' GMT',
+            label:item=>{ const v=item.parsed.y; if(v==null)return null; return `  ${v.toFixed(1)} µg/m³ · ${aqiStatus(v)}`; }
+          }
+        }
+      },
+      scales:{
+        x:{
+          display:showXTicks,
+          ticks:{maxRotation:0,autoSkip:true,maxTicksLimit:18,font:{family:'DM Mono,monospace',size:9},color:'#4b5563'},
+          grid:{display:false}, border:{color:'rgba(255,255,255,0.06)'}
+        },
+        y:{
+          min:0, max:globalMax,
+          ticks:{font:{family:'DM Mono,monospace',size:9},color:'#4b5563',maxTicksLimit:5,callback:v=>v+' µg'},
+          grid:{color:'rgba(255,255,255,0.05)'}, border:{color:'rgba(255,255,255,0.06)'}
+        }
+      }
+    },
+    plugins:[aqiBandsPlugin(showLabels), daySepsPlugin, selPlugin]
+  });
+}
+
+const charts = {
+  fb: makeChart('chart-fb', FB, true,  false),
+  s1: makeChart('chart-s1', S1, false, false),
+  s2: makeChart('chart-s2', S2, false, true)
+};
+
+// stat badges = period averages
+[['fb',FB],['s1',S1],['s2',S2]].forEach(([k,arr])=>{
+  const el=document.getElementById('stat-'+k);
+  el.textContent=avgs[k].toFixed(1)+' µg/m³ avg';
+  el.style.color=aqiColor(avgs[k]);
+});
+
+// ── TOGGLE S1/S2 ──────────────────────────────────────────────
+const rowVisible={s1:true,s2:true};
+
+function toggleRow(k){
+  rowVisible[k]=!rowVisible[k];
+  document.getElementById('row-'+k).classList.toggle('hidden-row',!rowVisible[k]);
+  const btn=document.querySelector(`.ds-btn[data-k="${k}"]`);
+  btn.classList.toggle('on', rowVisible[k]);
+  btn.classList.toggle('off',!rowVisible[k]);
+  updateXTicks();
+}
+
+function updateXTicks(){
+  charts.fb.options.scales.x.display = !rowVisible.s1 && !rowVisible.s2;
+  charts.s1.options.scales.x.display =  rowVisible.s1 && !rowVisible.s2;
+  charts.s2.options.scales.x.display =  rowVisible.s2;
+  Object.values(charts).forEach(c=>c.update('none'));
+}
+</script>
+</body>
+</html>
